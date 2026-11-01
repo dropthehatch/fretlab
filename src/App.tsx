@@ -5,6 +5,7 @@ import { keyScale } from '@/lib/theory'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ModeToggle, ThemeProvider } from '@/components/theme'
+import { SpeedInsights } from '@vercel/speed-insights/react'
 
 type View = 'explorer' | 'analysis'
 const viewFromHash = (): View => (location.hash === '#analysis' ? 'analysis' : 'explorer')
@@ -60,6 +61,7 @@ export default function App() {
           </TabsContent>
         </Tabs>
       </TooltipProvider>
+      <SpeedInsights />
     </ThemeProvider>
   )
 }
