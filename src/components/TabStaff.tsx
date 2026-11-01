@@ -9,8 +9,10 @@ interface BarLayout { b: number; notes: Note[]; beats: Beat[]; len: number; w: n
 const LS = 20, TOPP = 34, LBL = 26
 
 /** Tab for a bar range: rhythm-proportional spacing, rows that wrap to the container, notes colored by key role. */
-export function TabStaff({ song, track, from, to, keyInfo, focus, onPick }: {
+export function TabStaff({ song, track, from, to, keyInfo, labels = 'frets', focus, onPick }: {
   song: Song; track: Track; from: number; to: number; keyInfo: Key
+  /** What each note shows: its fret number (normal tab), note name, or interval from the key. */
+  labels?: 'frets' | 'notes' | 'int'
   focus: string | null; onPick: (k: string) => void
 }) {
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -74,7 +76,7 @@ export function TabStaff({ song, track, from, to, keyInfo, focus, onPick }: {
               <text className="tbn" x={bx + 4} y={TOPP - 18}>{bar.b + 1}</text>
               {sec && <text className="tsec" x={bx + 4 + String(bar.b + 1).length * 7 + 6} y={TOPP - 18}>{sec}</text>}
               {bar.notes.map(nt => {
-                const nx = X(nt.t), ny = y(nt.s), lab = String(nt.f), pw = lab.length > 1 ? 21 : 15, pc = mod(nt.p, 12)
+                const nx = X(nt.t), ny = y(nt.s), pc = mod(nt.p, 12), lab = labels === 'notes' ? pn(pc) : labels === 'int' ? INT[mod(pc - keyInfo.root, 12)] : String(nt.f), pw = lab.length > 1 ? 21 : 15
                 const k = `${nt.s}-${nt.f}`
                 return (
                   <g key={`${nt.t}:${nt.s}`}>
