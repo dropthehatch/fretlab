@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ModeToggle, ThemeProvider } from '@/components/theme'
 import { SpeedInsights } from '@vercel/speed-insights/react'
+import { Analytics } from '@vercel/analytics/react'
 
 type View = 'explorer' | 'analysis'
 const viewFromHash = (): View => (location.hash === '#analysis' ? 'analysis' : 'explorer')
@@ -62,6 +63,7 @@ export default function App() {
         </Tabs>
       </TooltipProvider>
       <SpeedInsights />
+      <Analytics route={`/${view}`} path={`/${view}`} />
     </ThemeProvider>
   )
 }
