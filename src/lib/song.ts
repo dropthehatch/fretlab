@@ -1,9 +1,14 @@
 // Song model, the built-in example riff, and Guitar Pro import (via alphaTab, loaded on demand).
 import { TUNING, mod, rankKeys, type Key } from './theory'
 
-export interface Note { bar: number; t: number; s: number; f: number; p: number; w: number; tie?: boolean; tech?: string }
+export interface Note {
+  bar: number; t: number; s: number; f: number; p: number; w: number
+  tie?: boolean   // tied from the previous note on this string (not re-picked)
+  slur?: boolean  // hammer-on / pull-off into the next note on this string
+  tech?: string   // other techniques: b = bend, / = slide, ~ = vibrato
+}
 export interface Beat { bar: number; t: number; dur: number; dots: number; tup: number; rest: boolean }
-export interface Track { name: string; tuning: number[]; perc: boolean; notes: Note[]; beats: Beat[] }
+export interface Track { name: string; tuning: number[]; perc: boolean; vocal?: boolean; notes: Note[]; beats: Beat[] }
 export interface BarMeta { num: number; start: number; len: number; tsN: number; tsD: number; section: string }
 export interface Song { title: string; artist: string; example: boolean; tempo: number; bars: BarMeta[]; tracks: Track[] }
 export interface BarGroup { name: string; from: number; to: number }
@@ -11,8 +16,12 @@ export interface BarGroup { name: string; from: number; to: number }
 /** Ticks per quarter note, matching alphaTab's MIDI resolution. */
 export const QUARTER = 960
 
-/** Guitar and bass tracks with notes. Drums and vocal/no-tab tracks are hidden. */
-export const isPlayable = (t: Track) => !t.perc && t.tuning.length > 0 && t.notes.length > 0
+/** Guitar and bass tracks with notes. Drums, vocals and tracks without tab are hidden. */
+export const isPlayable = (t: Track) => !t.perc && !t.vocal && t.tuning.length > 0 && t.notes.length > 0
+
+/** Vocal parts are often stored as a guitar-style track; spot them by name or by a voice/choir instrument sound. */
+const VOCAL_NAME = /\b(vocals?|vox|voice|voices|singer|sing|lyrics?|choir|chorus vox|bgv|backing vocals?)\b/i
+const VOCAL_PROGRAMS = [52, 53, 54, 85] // MIDI: choir aahs, voice oohs, synth voice, lead (voice)
 
 /* ---------- example riff ---------- */
 const TICKS: Record<string, number> = { 1: 3840, 2: 1920, 4: 960, 8: 480, 16: 240, 32: 120 }
@@ -89,15 +98,16 @@ function parseScore(score: any, fileName: string): Song {
           const s = n.string - 1 // alphaTab string 1 = lowest
           if (s < 0 || s >= tuning.length || typeof n.realValue !== 'number') return
           let tech = ''
-          if (n.isHammerPullOrigin) tech += n.hammerPullDestination && n.hammerPullDestination.fret < n.fret ? 'p' : 'h'
           if (n.hasBend) tech += 'b'
           if (n.slideOutType > 0) tech += '/'
           if (n.vibrato > 0) tech += '~'
-          notes.push({ bar: bi, t: b.playbackStart || 0, s, f: n.fret, p: n.realValue, w, tie: !!n.isTieDestination, tech })
+          notes.push({ bar: bi, t: b.playbackStart || 0, s, f: n.fret, p: n.realValue, w, tie: !!n.isTieDestination, slur: !!n.isHammerPullOrigin, tech })
         })
       })))
     }
-    return { name: tr.name || 'Track', tuning, perc, notes, beats }
+    const program = tr.playbackInfo?.program
+    const vocal = VOCAL_NAME.test(tr.name || '') || VOCAL_NAME.test(tr.shortName || '') || VOCAL_PROGRAMS.includes(program)
+    return { name: tr.name || 'Track', tuning, perc, vocal, notes, beats }
   })
   return {
     title: score.title || fileName.replace(/\.[^.]+$/, ''), artist: score.artist || '',

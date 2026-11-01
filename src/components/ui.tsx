@@ -1,7 +1,7 @@
 // Fretboard Lab's app-level building blocks, composed from shadcn/ui primitives in ./ui/.
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 /** Small uppercase label above a group of controls. */
@@ -28,8 +28,8 @@ export function Panel({ title, description, action, children, className }: {
       {(title || description) && (
         <CardHeader className="px-5">
           {title && <CardTitle className="font-display text-2xl leading-tight font-bold tracking-[.02em] text-balance uppercase">{title}</CardTitle>}
-          {description && <CardDescription>{description}</CardDescription>}
-          {action}
+          {description && <CardDescription className={action ? 'col-span-full' : undefined}>{description}</CardDescription>}
+          {action && <CardAction className="row-span-1">{action}</CardAction>}
         </CardHeader>
       )}
       <CardContent className="flex min-w-0 flex-col gap-3 px-5">{children}</CardContent>

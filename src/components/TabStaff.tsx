@@ -2,17 +2,18 @@ import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { FLAT, INT, SHARP, keyRole, mod, stringNames, usesFlats, type Key } from '@/lib/theory'
 import type { Beat, Note, Song, Track } from '@/lib/song'
 
-export const TAB_MAX = 32
 
 interface BarLayout { b: number; notes: Note[]; beats: Beat[]; len: number; w: number }
 
 const LS = 20, TOPP = 34, LBL = 26
 
 /** Tab for a bar range: rhythm-proportional spacing, rows that wrap to the container, notes colored by key role. */
-export function TabStaff({ song, track, from, to, keyInfo, labels = 'frets', focus, onPick }: {
+export function TabStaff({ song, track, from, to, keyInfo, labels = 'frets', colors = true, focus, onPick }: {
   song: Song; track: Track; from: number; to: number; keyInfo: Key
   /** What each note shows: its fret number (normal tab), note name, or interval from the key. */
   labels?: 'frets' | 'notes' | 'int'
+  /** Color notes by their role in the key (root, 3rd, 5th, in key, outside). Off = plain tab. */
+  colors?: boolean
   focus: string | null; onPick: (k: string) => void
 }) {
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -30,7 +31,7 @@ export function TabStaff({ song, track, from, to, keyInfo, labels = 'frets', foc
   const n = track.tuning.length, staffH = LS * (n - 1), rowH = TOPP + staffH + 50
   const names = stringNames(track.tuning)
   const pn = (pc: number) => (usesFlats(keyInfo.root, keyInfo.minor) ? FLAT : SHARP)[mod(pc, 12)]
-  const last = Math.min(to, from + TAB_MAX - 1)
+  const last = to
 
   const rows = useMemo(() => {
     if (!width) return []
@@ -61,6 +62,39 @@ export function TabStaff({ song, track, from, to, keyInfo, labels = 'frets', foc
 
   const y = (s: number) => TOPP + (n - 1 - s) * LS
 
+  // Arcs: a hammer-on/pull-off curves from its note to the next note on the same string,
+  // and a tied note curves back from the note before it — drawn like Songsterr's slurs.
+  const arcs = useMemo(() => {
+    const byString = new Map<number, Note[]>()
+    track.notes.forEach(n => { if (!byString.has(n.s)) byString.set(n.s, []); byString.get(n.s)!.push(n) })
+    byString.forEach(list => list.sort((a, b) => a.bar - b.bar || a.t - b.t))
+    const out: { a: Note; b: Note; kind: 'slur' | 'tie' }[] = []
+    byString.forEach(list => list.forEach((n, i) => {
+      const next = list[i + 1]
+      if (!next) return
+      if (next.tie) out.push({ a: n, b: next, kind: 'tie' })
+      else if (n.slur) out.push({ a: n, b: next, kind: 'slur' })
+    }))
+    return out.filter(({ a, b }) => b.bar >= from && a.bar <= last)
+  }, [track, from, last])
+
+  // Where each note lands: which row, and its x within that row.
+  const placed = useMemo(() => {
+    const m = new Map<string, { row: number; x: number }>()
+    rows.forEach((row, ri) => {
+      let x = LBL
+      row.forEach(bar => {
+        bar.notes.forEach(nt => m.set(`${nt.bar}:${nt.t}:${nt.s}`, { row: ri, x: x + 14 + (nt.t / bar.len) * (bar.w - 28) }))
+        x += bar.w
+      })
+    })
+    return m
+  }, [rows])
+  const arcPath = (x1: number, x2: number, yy: number) => {
+    const h = Math.min(9, 4 + (x2 - x1) / 10)
+    return `M${x1} ${yy} C${x1 + (x2 - x1) * 0.25} ${yy - h} ${x2 - (x2 - x1) * 0.25} ${yy - h} ${x2} ${yy}`
+  }
+
   return (
     <div ref={wrapRef} className="flex min-w-0 flex-col gap-1.5 overflow-x-auto">
       {rows.map((row, ri) => {
@@ -80,7 +114,7 @@ export function TabStaff({ song, track, from, to, keyInfo, labels = 'frets', foc
                 const k = `${nt.s}-${nt.f}`
                 return (
                   <g key={`${nt.t}:${nt.s}`}>
-                    <g className={`tn pick ${keyRole(pc, keyInfo)}${nt.tie ? ' tie' : ''}${focus === k ? ' focus' : ''}`} onClick={() => onPick(k)}>
+                    <g className={`tn pick ${colors ? keyRole(pc, keyInfo) : 'plain'}${nt.tie ? ' tie' : ''}${focus === k ? ' focus' : ''}`} onClick={() => onPick(k)}>
                       <rect x={nx - pw / 2} y={ny - 8} width={pw} height={16} rx={8} />
                       <text x={nx} y={ny + 0.5}>{lab}</text>
                       <title>{`${pn(pc)} (${INT[mod(pc - keyInfo.root, 12)]}) · fret ${nt.f}${nt.tie ? ' · tied' : ''}`}</title>
@@ -94,7 +128,8 @@ export function TabStaff({ song, track, from, to, keyInfo, labels = 'frets', foc
           )
         })
         return (
-          <svg key={ri} width={rw} height={rowH} viewBox={`0 0 ${rw} ${rowH}`} role="img" className="block"
+          <svg key={ri} width={rw} height={rowH} viewBox={`0 0 ${rw} ${rowH}`} role="img" className="block shrink-0"
+            style={{ contentVisibility: 'auto', containIntrinsicSize: `${rw}px ${rowH}px` }}
             aria-label={`Tab, bars ${row[0].b + 1} to ${row[row.length - 1].b + 1}`}>
             {track.tuning.map((_, s) => (
               <g key={s}>
@@ -102,6 +137,17 @@ export function TabStaff({ song, track, from, to, keyInfo, labels = 'frets', foc
                 <text className="tsn" x={LBL / 2} y={y(s)}>{names[s]}</text>
               </g>
             ))}
+            {arcs.map(({ a, b, kind }) => {
+              const pa = placed.get(`${a.bar}:${a.t}:${a.s}`), pb = placed.get(`${b.bar}:${b.t}:${b.s}`)
+              if (!pa && !pb) return null
+              if (pa?.row !== ri && pb?.row !== ri) return null
+              // Continues onto the next row (or comes from the previous one): draw the half that's on this row.
+              const x1 = pa?.row === ri ? pa.x + 4 : LBL + 2
+              const x2 = pb?.row === ri ? pb.x - 4 : rw - 3
+              const yy = y(a.s) - 9
+              return <path key={`${kind}${a.bar}:${a.t}:${a.s}`} className={`tarc ${kind}`} d={arcPath(x1, x2, yy)}
+                fill="none" stroke="var(--foreground)" strokeOpacity={kind === 'tie' ? 0.45 : 0.7} strokeWidth={1.5} strokeLinecap="round" />
+            })}
             {barEls}
             <line className="tb" x1={rw - 1} x2={rw - 1} y1={TOPP} y2={TOPP + staffH} />
           </svg>

@@ -4,7 +4,9 @@ import { FLAT, FRETS, INT, SHARP, buildPositions, keyName, keyRole, keyScale, mo
 import { analyzeRange, isPlayable, loadGuitarPro, makeSample, type Song } from '@/lib/song'
 import { cn } from '@/lib/utils'
 import { Fretboard, type BoardItem } from '@/components/Fretboard'
-import { TabStaff, TAB_MAX } from '@/components/TabStaff'
+import { TabStaff } from '@/components/TabStaff'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
 import { BarGrid } from '@/components/BarGrid'
 import { Choice, Field, FieldLabel, LegendDot, Panel } from '@/components/ui'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -14,11 +16,12 @@ import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
-interface State { song: Song; track: number; from: number; to: number; keyIdx: number; focus: string | null; labels: 'notes' | 'int' }
+interface State { song: Song; track: number; from: number; to: number; keyIdx: number; focus: string | null; labels: 'frets' | 'notes' | 'int'; colors: boolean }
 
 const fresh = (song: Song): State => ({
-  song, track: Math.max(0, song.tracks.findIndex(isPlayable)), from: 0, to: song.bars.length - 1, keyIdx: 0, focus: null, labels: 'notes',
+  song, track: Math.max(0, song.tracks.findIndex(isPlayable)), from: 0, to: song.bars.length - 1, keyIdx: 0, focus: null, labels: 'frets', colors: true,
 })
 
 export function Analysis({ onOpen }: { onOpen: (root: number, minor: boolean, pos: number) => void }) {
@@ -35,6 +38,17 @@ export function Analysis({ onOpen }: { onOpen: (root: number, minor: boolean, po
   const rangeTxt = st.from === st.to ? `bar ${st.from + 1}` : `bars ${st.from + 1}–${st.to + 1}`
   const maxFret = useMemo(() => Math.max(FRETS, ...track.notes.map(n => n.f)), [track])
   const whole = st.from === 0 && st.to === song.bars.length - 1
+
+  // Playable tracks for the dropdown. Repeated names ("GT", "GT", "GT") get numbered so they can be told apart.
+  const trackOptions = useMemo(() => {
+    const list = song.tracks.map((t, i) => ({ t, i })).filter(({ t }) => isPlayable(t))
+    const seen: Record<string, number> = {}
+    return list.map(({ t, i }) => {
+      const dup = list.filter(x => x.t.name === t.name).length > 1
+      seen[t.name] = (seen[t.name] ?? 0) + 1
+      return { i, name: dup ? `${t.name} ${seen[t.name]}` : t.name, detail: `${t.tuning.length} str · ${stringNames(t.tuning).join(' ')} · ${t.notes.length} notes` }
+    })
+  }, [song])
 
   async function onFile(file: File) {
     setStatus({ busy: `Reading ${file.name}…` })
@@ -55,7 +69,8 @@ export function Analysis({ onOpen }: { onOpen: (root: number, minor: boolean, po
       return {
         s: a.s, f: a.f, r: 9 + 4.5 * Math.sqrt(a.w / wmax),
         cls: key ? keyRole(pc, key) : 'tone',
-        label: st.labels === 'notes' || !key ? pn(pc) : INT[mod(pc - key.root, 12)],
+        // Frets mode shows note names on the neck (the fret is already its position) and fret numbers in the tab.
+        label: st.labels === 'int' && key ? INT[mod(pc - key.root, 12)] : pn(pc),
         title: `${pn(pc)} · string ${track.tuning.length - a.s}, fret ${a.f} · played ${a.c}×`,
       }
     })
@@ -111,11 +126,17 @@ export function Analysis({ onOpen }: { onOpen: (root: number, minor: boolean, po
 
         <Separator />
 
-        <Field label="Track">
-          <Choice look="chips" label="Track" value={st.track} onChange={i => set({ track: i, keyIdx: 0, focus: null })}
-            options={song.tracks.flatMap((t, i) => isPlayable(t)
-              ? [{ value: i, label: <>{t.name} <small className="font-mono text-[11px] opacity-70">{t.tuning.length} str · {stringNames(t.tuning).join(' ')}</small></> }]
-              : [])} />
+        <Field label="Track" htmlFor="track">
+          <Select value={String(st.track)} onValueChange={v => set({ track: +v, keyIdx: 0, focus: null })}>
+            <SelectTrigger id="track" className="w-full max-w-md bg-card"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {trackOptions.map(o => (
+                <SelectItem key={o.i} value={String(o.i)}>
+                  {o.name} <span className="font-mono text-[11px] text-muted-foreground">{o.detail}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Field>
 
         <Field label="Section">
@@ -154,8 +175,8 @@ export function Analysis({ onOpen }: { onOpen: (root: number, minor: boolean, po
               <span>Bigger dot = played more</span>
             </div>
           )}
-          <Choice label="Dot labels" value={st.labels} onChange={v => set({ labels: v })}
-            options={[{ value: 'notes', label: 'Notes' }, { value: 'int', label: 'Intervals' }]} />
+          <Choice label="Labels" value={st.labels} onChange={v => set({ labels: v })}
+            options={[{ value: 'frets', label: 'Frets' }, { value: 'notes', label: 'Notes' }, { value: 'int', label: 'Intervals' }]} />
         </div>
       </Card>
 
@@ -163,6 +184,17 @@ export function Analysis({ onOpen }: { onOpen: (root: number, minor: boolean, po
         <Panel title="Likely key"><p className="m-0 text-muted-foreground">{track.name} has no notes in {rangeTxt}. Pick another section or track.</p></Panel>
       ) : (
         <>
+          <Panel title={`Tab · ${rangeTxt}`}
+            description="Tap a note to find it on the fretboard."
+            action={
+              <div className="flex items-center gap-2 pt-1">
+                <Switch id="key-colors" checked={st.colors} onCheckedChange={v => set({ colors: v })} />
+                <Label htmlFor="key-colors" className="cursor-pointer text-[13px] font-medium whitespace-nowrap">Key colors</Label>
+              </div>
+            }>
+            <TabStaff song={song} track={track} from={st.from} to={st.to} keyInfo={key} labels={st.labels} colors={st.colors} focus={st.focus} onPick={pick} />
+          </Panel>
+
           <section className="grid grid-cols-1 gap-[18px] md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
             <Panel title={`Likely key: ${keyName(key)}`} description={`${track.name}, ${rangeTxt}, ${an.notes.length} notes. Tap another key to recolor the fretboard.`}>
               {an.rank.map((r, i) => (
@@ -214,12 +246,7 @@ export function Analysis({ onOpen }: { onOpen: (root: number, minor: boolean, po
             </Panel>
           </section>
 
-          <Panel title={`Tab · ${rangeTxt}`} description="Colors match the fretboard. Tap a number to find it on the neck.">
-            {st.to - st.from + 1 > TAB_MAX && (
-              <p className="m-0 text-[13px] text-muted-foreground">Showing the first {TAB_MAX} bars ({st.from + 1}–{st.from + TAB_MAX}). Narrow the range to read the rest.</p>
-            )}
-            <TabStaff song={song} track={track} from={st.from} to={st.to} keyInfo={key} focus={st.focus} onPick={pick} />
-          </Panel>
+
         </>
       )}
     </div>
