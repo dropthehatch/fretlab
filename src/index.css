@@ -1,0 +1,147 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* shadcn/ui switches themes with a `.dark` class on <html> (see ThemeProvider). */
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * shadcn/ui semantic tokens, plus Fretboard Lab's own music tokens:
+ *   --c-r / --c-3 / --c-5 / --c-7  chord-tone colors (root, 3rd, 5th, 7th)
+ *   --board / --fret / --string / --nut / --inlay  the neck drawing
+ *   --tone / --tone-ink  non-chord scale notes
+ */
+:root {
+  --radius: 0.625rem;
+  --background: #edf0f3;
+  --foreground: #1a1f26;
+  --card: #ffffff;
+  --card-foreground: #1a1f26;
+  --popover: #ffffff;
+  --popover-foreground: #1a1f26;
+  --primary: #2457c5;
+  --primary-foreground: #ffffff;
+  --secondary: #e3e8ee;
+  --secondary-foreground: #1a1f26;
+  --muted: #e3e8ee;
+  --muted-foreground: #5b6571;
+  --accent: #e3e8ee;
+  --accent-foreground: #1a1f26;
+  --destructive: #c62f28;
+  --border: #d4dae1;
+  --input: #cdd4dc;
+  --ring: #2457c5;
+
+  --board: #dfe2e6; --fret: #a9afb7; --string: #8b929b; --nut: #4b5159; --inlay: #c6cbd1;
+  --c-r: #d4342c; --c-3: #e6a314; --c-5: #239a62; --c-7: #8b4fd2; --tone: #ffffff; --tone-ink: #2a3038;
+}
+
+.dark {
+  --background: #111418;
+  --foreground: #e6e9ed;
+  --card: #1a1e24;
+  --card-foreground: #e6e9ed;
+  --popover: #1a1e24;
+  --popover-foreground: #e6e9ed;
+  --primary: #7fa1ff;
+  --primary-foreground: #0d1220;
+  --secondary: #262c34;
+  --secondary-foreground: #e6e9ed;
+  --muted: #262c34;
+  --muted-foreground: #98a2ad;
+  --accent: #262c34;
+  --accent-foreground: #e6e9ed;
+  --destructive: #f0605a;
+  --border: #2b313a;
+  --input: #3a424c;
+  --ring: #7fa1ff;
+
+  --board: #1f2328; --fret: #3b424b; --string: #6b737d; --nut: #a3abb4; --inlay: #2d333a;
+  --tone: #4a525c; --tone-ink: #eef1f4;
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  /* music colors as utilities: bg-root, text-third, bg-fifth, bg-seventh, bg-tone … */
+  --color-root: var(--c-r);
+  --color-third: var(--c-3);
+  --color-fifth: var(--c-5);
+  --color-seventh: var(--c-7);
+  --color-tone: var(--tone);
+  --color-tone-foreground: var(--tone-ink);
+  --font-display: "Big Shoulders Display", "Arial Narrow", Impact, sans-serif;
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  html { color-scheme: light; }
+  html.dark { color-scheme: dark; }
+  body { @apply bg-background text-foreground font-sans; font-size: 15px; line-height: 1.5; }
+}
+
+/* ---------- SVG: fretboard ---------- */
+.dot circle { fill: var(--tone); stroke: rgba(0,0,0,.28); stroke-width: 1; }
+.dot text { fill: var(--tone-ink); font: 600 11px var(--font-sans); text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.dot.r circle { fill: var(--c-r); } .dot.r text { fill: #fff; }
+.dot.t3 circle { fill: var(--c-3); } .dot.t3 text { fill: #1d1606; }
+.dot.t5 circle { fill: var(--c-5); } .dot.t5 text { fill: #fff; }
+.dot.t7 circle { fill: var(--c-7); } .dot.t7 text { fill: #fff; }
+.dot.out circle { fill: var(--board); stroke: var(--muted-foreground); stroke-width: 1.5; stroke-dasharray: 3 2; }
+.dot.out text { fill: var(--foreground); }
+.dot.faint { opacity: .28; }
+.dot.ext circle { stroke: var(--nut); stroke-width: 2; stroke-dasharray: 3 2; }
+.dot.sel circle { stroke: var(--nut); stroke-width: 2; }
+.dot.pick { cursor: pointer; }
+.dot circle.badge { fill: var(--primary); stroke: var(--card); stroke-width: 2; }
+.ord { fill: var(--foreground); font: 500 9px var(--font-mono); text-anchor: middle; }
+.fnum { fill: var(--muted-foreground); font: 500 11px var(--font-mono); text-anchor: middle; }
+.sname { fill: var(--muted-foreground); font: 500 11px var(--font-mono); text-anchor: middle; dominant-baseline: central; }
+
+/* ---------- SVG: tab staff ---------- */
+.tl { stroke: var(--muted-foreground); stroke-opacity: .45; stroke-width: 1; }
+.tb { stroke: var(--muted-foreground); stroke-width: 1.2; }
+.tbn { fill: var(--muted-foreground); font: 500 11px var(--font-mono); }
+.tsec { fill: var(--primary); font: 600 10px var(--font-sans); letter-spacing: .06em; text-transform: uppercase; }
+.tsn { fill: var(--muted-foreground); font: 500 11px var(--font-mono); text-anchor: middle; dominant-baseline: central; }
+.ttech { fill: var(--muted-foreground); font: 500 9px var(--font-mono); text-anchor: middle; }
+.tn rect { fill: var(--tone); stroke: var(--muted-foreground); stroke-width: 1; }
+.tn text { fill: var(--tone-ink); font: 600 11px var(--font-mono); text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.tn.r rect { fill: var(--c-r); stroke: none; } .tn.r text { fill: #fff; }
+.tn.t3 rect { fill: var(--c-3); stroke: none; } .tn.t3 text { fill: #1d1606; }
+.tn.t5 rect { fill: var(--c-5); stroke: none; } .tn.t5 text { fill: #fff; }
+.tn.t7 rect { fill: var(--c-7); stroke: none; } .tn.t7 text { fill: #fff; }
+.tn.out rect { fill: var(--card); stroke-dasharray: 3 2; stroke-width: 1.3; }
+.tn.out text { fill: var(--foreground); }
+.tn.tie { opacity: .4; }
+.tn.ext rect { stroke: var(--foreground); stroke-width: 1.5; stroke-dasharray: 3 2; }
+.tn.pick { cursor: pointer; }
+.tn.focus rect, .dot.focus circle { stroke: var(--foreground); stroke-width: 3; stroke-dasharray: none; }
+.tpath { fill: none; stroke: var(--primary); stroke-opacity: .35; stroke-width: 2; stroke-linejoin: round; }
+.tpick { fill: var(--foreground); font: 600 14px var(--font-sans); text-anchor: middle; }
+.tpick.tech { font: 500 11px var(--font-mono); fill: var(--muted-foreground); }
+.tstep { fill: var(--muted-foreground); font: 500 9px var(--font-mono); text-anchor: middle; }
+.rh { stroke: var(--muted-foreground); stroke-width: 1.4; fill: none; stroke-linecap: round; }
+.rhf { fill: var(--muted-foreground); }
+.rht { fill: var(--muted-foreground); font: 600 10px var(--font-mono); text-anchor: middle; }
