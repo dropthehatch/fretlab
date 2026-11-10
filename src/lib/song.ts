@@ -20,8 +20,19 @@ export const QUARTER = 960
 export const isPlayable = (t: Track) => !t.perc && !t.vocal && t.tuning.length > 0 && t.notes.length > 0
 
 /** Vocal parts are often stored as a guitar-style track; spot them by name or by a voice/choir instrument sound. */
-const VOCAL_NAME = /\b(vocals?|vox|voice|voices|singer|sing|lyrics?|choir|chorus vox|bgv|backing vocals?)\b/i
+const VOCAL_WORDS = /\b(vocals?|voices?|singer|singing|lyrics?|choir|bgv|backing vocals?|lead vocals?|harmony vocals?)\b/i
+const INSTRUMENT_WORDS = /\b(guitars?|gtrs?|bass|ukulele|banjo|mandolin|dobro|lap steel|pedal steel)\b/i
 const VOCAL_PROGRAMS = [52, 53, 54, 85] // MIDI: choir aahs, voice oohs, synth voice, lead (voice)
+
+/**
+ * Songsterr names tracks "Player | Gear | Role", e.g. "Jimmy Page | Vox 238 Country Western | Acoustic Rhythm Guitar".
+ * Only the role says what the part is (gear names like "Vox" are brands), and anything called a guitar or bass is kept.
+ */
+function isVocalTrack(name: string, program: number | undefined) {
+  const role = name.split('|').pop()!.trim()
+  if (INSTRUMENT_WORDS.test(role) || INSTRUMENT_WORDS.test(name)) return false
+  return VOCAL_WORDS.test(role) || (program != null && VOCAL_PROGRAMS.includes(program))
+}
 
 /* ---------- example riff ---------- */
 const TICKS: Record<string, number> = { 1: 3840, 2: 1920, 4: 960, 8: 480, 16: 240, 32: 120 }
@@ -106,7 +117,7 @@ function parseScore(score: any, fileName: string): Song {
       })))
     }
     const program = tr.playbackInfo?.program
-    const vocal = VOCAL_NAME.test(tr.name || '') || VOCAL_NAME.test(tr.shortName || '') || VOCAL_PROGRAMS.includes(program)
+    const vocal = isVocalTrack(tr.name || '', program)
     return { name: tr.name || 'Track', tuning, perc, vocal, notes, beats }
   })
   return {

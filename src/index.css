@@ -31,6 +31,7 @@
   --input: #cdd4dc;
   --ring: #2457c5;
 
+  --prog-now: #2457c5; --prog-next: #e0782e;
   --board: #dfe2e6; --fret: #a9afb7; --string: #8b929b; --nut: #4b5159; --inlay: #c6cbd1;
   --c-r: #d4342c; --c-3: #e6a314; --c-5: #239a62; --c-7: #8b4fd2; --tone: #ffffff; --tone-ink: #2a3038;
 }
@@ -55,6 +56,7 @@
   --input: #3a424c;
   --ring: #7fa1ff;
 
+  --prog-now: #4f7ff0; --prog-next: #f08a3c;
   --board: #1f2328; --fret: #3b424b; --string: #6b737d; --nut: #a3abb4; --inlay: #2d333a;
   --tone: #4a525c; --tone-ink: #eef1f4;
 }
@@ -114,6 +116,11 @@
 .dot.ext circle { stroke: var(--nut); stroke-width: 2; stroke-dasharray: 3 2; }
 .dot.sel circle { stroke: var(--nut); stroke-width: 2; }
 .dot.pick { cursor: pointer; }
+/* Progression: current chord blue, next chord orange, notes in both ringed in orange */
+.dot.pc-now circle { fill: var(--prog-now); stroke: none; } .dot.pc-now text { fill: #fff; }
+.dot.pc-next circle { fill: var(--prog-next); stroke: none; } .dot.pc-next text { fill: #1d1006; }
+.dot.shared circle { stroke: var(--prog-next); stroke-width: 3.5; stroke-dasharray: none; }
+.dot.pc-now.sel:not(.shared) circle { stroke: var(--foreground); stroke-width: 2; }
 .dot circle.badge { fill: var(--primary); stroke: var(--card); stroke-width: 2; }
 .ord { fill: var(--foreground); font: 500 9px var(--font-mono); text-anchor: middle; }
 .fnum { fill: var(--muted-foreground); font: 500 11px var(--font-mono); text-anchor: middle; }

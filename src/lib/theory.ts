@@ -43,10 +43,12 @@ export interface FNote { s: number; f: number; p: number }
 export interface Chord { rootPc: number; iv: number[]; name: string; roman: string }
 export interface Position { d: number; notes: FNote[]; lo: number; hi: number }
 export interface Shape {
-  kind: 'sweep' | 'triad'
+  kind: 'sweep' | 'triad' | 'grip'
   notes: (FNote & { o?: number })[]
   ext: (FNote & { o?: number })[]
   lo: number; hi: number; bass: number
+  /** Full chords: which CAGED shape this grip comes from, e.g. "E shape". */
+  name?: string
 }
 export interface SeqNote extends FNote { st?: string }
 
@@ -152,6 +154,50 @@ export function sweeps(chord: Chord, nStrings: number): Shape[] {
 }
 
 /** Close-voiced triads on three adjacent strings starting at `set` (0 = E A D). */
+/*
+ * Full chord grips from the CAGED system: the five open-chord shapes (C, A, G, E, D) moved up the neck.
+ * Each template is the major shape as fret offsets from its root (low E → high e; null = not played).
+ * For minor and diminished chords the 3rd and 5th are lowered to match, and a string is dropped
+ * if that would need a fret below zero, which is how the minor versions are usually played.
+ */
+const CAGED: { name: string; rootString: number; offs: (number | null)[] }[] = [
+  { name: 'E shape', rootString: 0, offs: [0, 2, 2, 1, 0, 0] },
+  { name: 'D shape', rootString: 2, offs: [null, null, 0, 2, 3, 2] },
+  { name: 'C shape', rootString: 1, offs: [null, 0, -1, -3, -2, -3] },
+  { name: 'A shape', rootString: 1, offs: [null, 0, 2, 2, 2, 0] },
+  { name: 'G shape', rootString: 0, offs: [0, -1, -3, -3, -3, 0] },
+]
+
+export function grips(chord: Chord): Shape[] {
+  const third = mod(chord.iv[1], 12), fifth = mod(chord.iv[2], 12), out: Shape[] = [], seen = new Set<string>()
+  for (const t of CAGED) {
+    const first = mod(chord.rootPc - TUNING[t.rootString], 12)
+    for (const r of [first, first + 12]) {
+      const notes: FNote[] = []
+      let offNeck = false
+      t.offs.forEach((off, s) => {
+        if (off == null) return
+        let f = r + off
+        const majorIv = mod(TUNING[s] + f - chord.rootPc, 12)
+        if (majorIv === 4) f += third - 4      // move the 3rd for minor / diminished
+        else if (majorIv === 7) f += fifth - 7 // move the 5th for diminished / augmented
+        if (f > FRETS) { offNeck = true; return }
+        if (f < 0) return // the lowered note would sit behind the nut: leave that string out
+        notes.push({ s, f, p: TUNING[s] + f })
+      })
+      if (offNeck || notes.length < 3 || !notes.some(n => n.s === t.rootString)) continue
+      const fretted = notes.filter(n => n.f > 0).map(n => n.f)
+      if (fretted.length && Math.max(...fretted) - Math.min(...fretted) > 4) continue
+      const key = notes.map(n => `${n.s}:${n.f}`).join(',')
+      if (seen.has(key)) continue
+      seen.add(key)
+      const fs = notes.map(n => n.f)
+      out.push({ kind: 'grip', name: t.name, notes, ext: [], lo: Math.min(...fs), hi: Math.max(...fs), bass: roleIn(chord, notes[0].p) })
+    }
+  }
+  return out.sort((a, b) => a.lo - b.lo)
+}
+
 export function triads(chord: Chord, set: number): Shape[] {
   const ss = [set, set + 1, set + 2], pcs = chordPcs(chord).slice(0, 3), out: Shape[] = []
   const opts = ss.map(s => {

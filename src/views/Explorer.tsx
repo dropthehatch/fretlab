@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { ArrowRightIcon, ChevronLeftIcon, ChevronRightIcon, XIcon } from 'lucide-react'
 import {
   FRETS, INT, KEYNAMES, ROLE, ROLENAME, SCALES, SNAME, TUNING,
-  buildChords, buildPositions, chordPcs, mod, namer, roleIn, scaleUsesFlats, sweepSeq, sweeps, triads,
+  buildChords, buildPositions, chordPcs, grips, mod, namer, roleIn, scaleUsesFlats, sweepSeq, sweeps, triads,
   type Chord, type FNote, type ScaleKey, type Shape,
 } from '@/lib/theory'
 import { Fretboard, type BoardItem } from '@/components/Fretboard'
@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { cn } from '@/lib/utils'
 
-export type ShapeView = 'arp' | 'triad' | 'sweep'
+export type ShapeView = 'arp' | 'triad' | 'sweep' | 'grip'
 export type ExView = 'scale' | ShapeView | 'prog'
 export interface ExplorerState {
   root: number; scale: ScaleKey; seventh: boolean; view: ExView
@@ -26,19 +26,23 @@ export interface ExplorerState {
   chords: number[]
   /** Progression view: which chord is in focus (full color). */
   active: number
-  /** Progression view: draw each chord as chord tones, a triad, or a sweep. */
-  progShape: ShapeView
+  /** Progression view: show each chord's tones in a position, or a playable voicing of it. */
+  progShape: 'arp' | 'voicing'
+  /** Progression › Voicings: 3-string triads or full CAGED chord grips. */
+  vkind: 'triad' | 'grip'
   pos: number; sweepN: number; triSet: number
   shapeIdx: number | null // null = pick a sensible default shape
   /** Fret to stay near when stepping through a progression, so shapes don't jump around the neck. */
   anchor: number | null
   labels: 'notes' | 'int'
+  /** Triads & Sweeps: only show voicings with this chord tone in the bass (0 root, 1 3rd, 2 5th, 3 7th); -1 = all. */
+  inv: number
 }
 
 export const initialExplorer: ExplorerState = {
   root: 11, scale: 'aeolian', seventh: false, view: 'sweep', chordDeg: 0,
-  chords: defaultProgression('aeolian'), active: 0, progShape: 'sweep',
-  pos: -1, sweepN: 5, triSet: 2, shapeIdx: null, anchor: null, labels: 'notes',
+  chords: defaultProgression('aeolian'), active: 0, progShape: 'voicing', vkind: 'triad',
+  pos: -1, sweepN: 5, triSet: 2, shapeIdx: null, anchor: null, labels: 'notes', inv: -1,
 }
 
 /** A common starting progression: i–VI–III–VII in minor keys, I–V–vi–IV in major ones. */
@@ -52,9 +56,9 @@ const VIEWS: { value: ExView; label: string }[] = [
   { value: 'sweep', label: 'Sweeps' }, { value: 'prog', label: 'Progression' },
 ]
 
+const INVERSIONS = ['Root position', '1st inversion', '2nd inversion', '3rd inversion']
+
 const ROLE_COLORS = ['var(--c-r)', 'var(--c-3)', 'var(--c-5)', 'var(--c-7)']
-/** Opacity for the current chord, the next one, and the ones after it. */
-const PROG_OPACITY = [1, 0.6, 0.42, 0.3, 0.22]
 
 export function Explorer({ st, set }: { st: ExplorerState; set: (patch: Partial<ExplorerState>) => void }) {
   // Changing anything other than the shape stepper resets to the default shape.
@@ -69,7 +73,7 @@ export function Explorer({ st, set }: { st: ExplorerState; set: (patch: Partial<
     const active = Math.min(st.active, prog.length - 1)
     const inProg = st.view === 'prog'
     /** What gets drawn for each chord: chord tones, triads or sweeps (Scale view counts as chord tones here). */
-    const sv: ShapeView | 'scale' = inProg ? st.progShape : (st.view as ShapeView | 'scale')
+    const sv: ShapeView | 'scale' = inProg ? (st.progShape === 'arp' ? 'arp' : st.vkind) : (st.view as ShapeView | 'scale')
     const chord = inProg ? chords[prog[active]] : chords[Math.min(st.chordDeg, chords.length - 1)]
     const next = inProg && prog.length > 1 ? chords[prog[(active + 1) % prog.length]] : null
     const nextPcs = next ? chordPcs(next) : []
@@ -80,8 +84,9 @@ export function Explorer({ st, set }: { st: ExplorerState; set: (patch: Partial<
     const posObj = st.pos >= 0 && st.pos < positions.length ? positions[st.pos] : null
     // All sweep/triad shapes for a chord, limited to the chosen scale position.
     const shapesFor = (c: Chord) => {
-      let list = sv === 'sweep' ? sweeps(c, st.sweepN) : sv === 'triad' ? triads(c, st.triSet) : []
+      let list = sv === 'sweep' ? sweeps(c, st.sweepN) : sv === 'triad' ? triads(c, st.triSet) : sv === 'grip' ? grips(c) : []
       if (posObj) list = list.filter(sh => sh.notes.every(n => n.f >= posObj.lo - 1 && n.f <= posObj.hi + 1))
+      if (st.inv >= 0 && sv !== 'grip') list = list.filter(sh => sh.bass === st.inv)
       return list.sort((a, b) => a.lo - b.lo || a.bass - b.bass)
     }
     // The shape closest to a fret, preferring root-position shapes on a tie.
@@ -92,34 +97,43 @@ export function Explorer({ st, set }: { st: ExplorerState; set: (patch: Partial<
     const shapes = shapesFor(chord)
     let idx = st.shapeIdx ?? -1
     if (idx < 0 && st.anchor != null && shapes.length) idx = nearest(shapes, st.anchor) // stepping through a progression
-    if (idx < 0) idx = Math.max(0, shapes.findIndex(s => s.bass === 0 && s.lo >= 5))
+    if (idx < 0) idx = Math.max(0, shapes.findIndex(s => (st.inv >= 0 || s.bass === 0) && s.lo >= 5))
     if (idx >= shapes.length) idx = 0
     const shape = shapes[idx] ?? null
 
     // Progression overview: every chord in the progression, in the same area of the neck as the current shape.
     const center = shape ? (shape.lo + shape.hi) / 2 : posObj ? (posObj.lo + posObj.hi) / 2 : null
-    const overview = prog.map((deg, k) => {
+    const overview = prog.map((deg, k) => ({ deg, k })).filter(({ k }) => {
+      const step = mod(k - active, prog.length)
+      return step === 0 || step === 1
+    }).map(({ deg, k }) => {
       const c = chords[deg], step = mod(k - active, prog.length)
       let sh: Shape | null = null
       if (k === active) sh = shape
-      else if (sv === 'sweep' || sv === 'triad') {
+      else if (sv === 'sweep' || sv === 'triad' || sv === 'grip') {
         const list = shapesFor(c)
         sh = list.length ? list[center == null ? Math.max(0, list.findIndex(s => s.bass === 0 && s.lo >= 5)) : nearest(list, center)] : null
       }
-      return { chord: c, step, shape: sh, opacity: PROG_OPACITY[Math.min(step, PROG_OPACITY.length - 1)] }
+      return { chord: c, step, shape: sh }
     })
     return { sc, nm, chords, prog, active, inProg, sv, chord, next, nextPcs, pcs, role, intOf, positions, posObj, shapes, idx, shape, overview }
   }, [st])
 
   const { sc, nm, chords, prog, active, inProg, sv, chord, next, nextPcs, pcs, role, intOf, positions, posObj, shapes, idx, shape, overview } = d
   const progressionMode = inProg && prog.length > 1
+  /** Chord tones across the whole neck is a wall of dots, so Progression › Chord tones starts on a mid-neck position. */
+  const startPos = Math.max(0, positions.findIndex(p => p.lo >= 5))
+  const withStartPos = (patch: Partial<ExplorerState>) => {
+    const view = patch.view ?? st.view, shape = patch.progShape ?? st.progShape
+    return view === 'prog' && shape === 'arp' && st.pos < 0 ? { ...patch, pos: startPos } : patch
+  }
 
   /** Move to another chord in the progression, staying near the current shape on the neck. */
   const goTo = (i: number) => {
     const here = shape ? (shape.lo + shape.hi) / 2 : posObj ? (posObj.lo + posObj.hi) / 2 : null
     set({ active: mod(i, prog.length), shapeIdx: null, anchor: here })
   }
-  const isShapeView = sv === 'sweep' || sv === 'triad'
+  const isShapeView = sv === 'sweep' || sv === 'triad' || sv === 'grip'
 
   const items: BoardItem[] = useMemo(() => {
     const all = (want: number[]) => {
@@ -130,8 +144,7 @@ export function Explorer({ st, set }: { st: ExplorerState; set: (patch: Partial<
     type It = FNote & { faint?: boolean; sel?: boolean; ext?: boolean; order?: number }
 
     if (progressionMode) {
-      // Only the progression's chords: current chord in full color, later chords fading out.
-      // Where two chords land on the same fret, the one closest in the progression wins.
+      // Only the current chord (blue) and the next one (orange). A spot used by both chords is blue with an orange ring.
       const byKey = new Map<string, BoardItem & { step: number }>()
       overview.forEach(o => {
         const cPcs = chordPcs(o.chord)
@@ -141,18 +154,22 @@ export function Explorer({ st, set }: { st: ExplorerState; set: (patch: Partial<
           : sv === 'arp' ? (posObj ? posObj.notes.filter(n => cPcs.includes(mod(n.p, 12))) : all(cPcs)) : []
         notes.forEach(n => {
           const k = `${n.s}-${n.f}`, prev = byKey.get(k)
-          if (prev && prev.step <= o.step) return
-          const pc = mod(n.p, 12), r = roleIn(o.chord, pc)
+          const pc = mod(n.p, 12), isRoot = pc === o.chord.rootPc
+          if (prev) {
+            // Same string and fret in both chords: keep the current chord's dot and mark it as shared.
+            if (!prev.cls.includes('shared')) { prev.cls += ' shared'; prev.title += ` · also in ${o.chord.name}` }
+            return
+          }
           byKey.set(k, {
-            s: n.s, f: n.f, order: n.order, step: o.step, opacity: o.opacity,
-            badge: o.step === 0 && nextPcs.includes(pc),
+            s: n.s, f: n.f, order: n.order, step: o.step,
+            r: isRoot ? 14 : 12,
             label: st.labels === 'notes' ? nm(pc) : INT[mod(pc - o.chord.rootPc, 12)],
             title: `${o.chord.name}: ${nm(pc)} (${INT[mod(pc - o.chord.rootPc, 12)]})`,
-            cls: [r >= 0 ? ROLE[r] : 'tone', n.sel && 'sel', n.ext && 'ext'].filter(Boolean).join(' '),
+            cls: [o.step === 0 ? 'pc-now' : 'pc-next', n.sel && 'sel', n.ext && 'ext'].filter(Boolean).join(' '),
           })
         })
       })
-      // Draw the faintest first so the current chord sits on top.
+      // Draw the next chord first so the current chord sits on top.
       return [...byKey.values()].sort((a, b) => b.step - a.step)
     }
 
@@ -201,31 +218,32 @@ export function Explorer({ st, set }: { st: ExplorerState; set: (patch: Partial<
             <SelectContent>{(Object.keys(SCALES) as ScaleKey[]).map(k => <SelectItem key={k} value={k}>{SCALES[k].name}</SelectItem>)}</SelectContent>
           </Select>
         </Field>
-        <Field label="Dot labels" className="col-span-2 md:col-span-1">
+        <Field label="Dot labels" className="sm:col-span-2 md:col-span-1">
           <Choice label="Dot labels" value={st.labels} onChange={v => set({ labels: v })}
             options={[{ value: 'notes', label: 'Notes' }, { value: 'int', label: 'Intervals' }]} />
         </Field>
+        {/* Phones: Show is a dropdown sitting next to Dot labels. Wider screens get the full button row below. */}
+        <Field label="Show" className="sm:hidden">
+          <Select value={st.view} onValueChange={v => change(withStartPos({ view: v as ExView }))}>
+            <SelectTrigger className="w-full bg-card font-display text-base font-bold tracking-[.03em] uppercase" aria-label="Show"><SelectValue /></SelectTrigger>
+            <SelectContent>{VIEWS.map(v => <SelectItem key={v.value} value={v.value}>{v.label}</SelectItem>)}</SelectContent>
+          </Select>
+        </Field>
 
         <div className="col-span-full grid grid-cols-1 items-end gap-x-6 gap-y-4 lg:grid-cols-[auto_minmax(0,1fr)]">
-          <Field label="Show">
-            <div className="hidden sm:block">
-              <Choice label="Show" value={st.view} onChange={v => change({ view: v })}
-                itemClassName="px-3 font-display text-[15px] font-bold tracking-[.03em] uppercase"
-                options={VIEWS} />
-            </div>
-            <Select value={st.view} onValueChange={v => change({ view: v as ExView })}>
-              <SelectTrigger className="w-full bg-card font-display text-base font-bold tracking-[.03em] uppercase sm:hidden" aria-label="Show"><SelectValue /></SelectTrigger>
-              <SelectContent>{VIEWS.map(v => <SelectItem key={v.value} value={v.value}>{v.label}</SelectItem>)}</SelectContent>
-            </Select>
+          <Field label="Show" className="hidden sm:flex">
+            <Choice label="Show" value={st.view} onChange={v => change(withStartPos({ view: v }))}
+              itemClassName="px-3 font-display text-[15px] font-bold tracking-[.03em] uppercase"
+              options={VIEWS} />
           </Field>
 
-          <Field label="Scale position (frets)">
-            <Choice look="chips" size="sm" label="Scale position" itemClassName="px-2.5" value={st.pos < 0 ? -1 : st.pos} onChange={i => change({ pos: i })}
+          <Field label={posObj ? `Position · frets ${posObj.lo}–${posObj.hi}` : 'Position'}>
+            <Choice look="chips" size="sm" label="Scale position" itemClassName="min-w-9 px-2.5" value={st.pos < 0 ? -1 : st.pos} onChange={i => change({ pos: i })}
               options={[
-                { value: -1, label: 'Whole neck' },
+                { value: -1, label: 'All', title: 'The whole neck' },
                 ...positions.map((p, i) => ({
-                  value: i, label: `${p.lo}–${p.hi}`, hint: i + 1,
-                  title: `Position ${i + 1}: starts on ${nm(st.root + sc.iv[p.d])} on the low E`,
+                  value: i, label: String(i + 1),
+                  title: `Position ${i + 1}: frets ${p.lo}–${p.hi}, starting on ${nm(st.root + sc.iv[p.d])} on the low E`,
                 })),
               ]} />
           </Field>
@@ -281,7 +299,9 @@ export function Explorer({ st, set }: { st: ExplorerState; set: (patch: Partial<
                   <li key={deg} className="flex items-center gap-1">
                     {i > 0 && <ArrowRightIcon className="size-3.5 text-muted-foreground" aria-hidden />}
                     <Button size="sm" variant={i === active ? 'default' : 'outline'} aria-current={i === active ? 'step' : undefined}
-                      className={cn('rounded-full', i !== active && 'bg-card')} onClick={() => goTo(i)}>
+                      className={cn('rounded-full', i === active && 'bg-[var(--prog-now)] text-white hover:bg-[var(--prog-now)]/90',
+                        i !== active && 'bg-card', i === mod(active + 1, prog.length) && 'border-2 border-[var(--prog-next)] dark:border-[var(--prog-next)]')}
+                      onClick={() => goTo(i)}>
                       {chords[deg].name} <small className="font-mono text-[10px] opacity-70">{chords[deg].roman}</small>
                     </Button>
                   </li>
@@ -299,8 +319,11 @@ export function Explorer({ st, set }: { st: ExplorerState; set: (patch: Partial<
               </p>
             )}
             <Field label="Shapes">
-              <Choice label="Progression shapes" value={st.progShape} onChange={v => change({ progShape: v })}
-                options={[{ value: 'arp', label: 'Chord tones' }, { value: 'triad', label: 'Triads' }, { value: 'sweep', label: 'Sweeps' }]} />
+              <Choice label="Progression shapes" value={st.progShape} onChange={v => change(withStartPos({ progShape: v }))}
+                options={[
+                  { value: 'arp', label: 'Chord tones', title: 'Every note of each chord inside one hand position — targets for soloing' },
+                  { value: 'voicing', label: 'Voicings', title: 'A playable shape for each chord, near the last one' },
+                ]} />
             </Field>
           </div>
         )}
@@ -311,35 +334,52 @@ export function Explorer({ st, set }: { st: ExplorerState; set: (patch: Partial<
         <Fretboard tuning={TUNING} items={items} band={posObj} scrollTo={focusRange} label="Guitar fretboard" />
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2.5 border-t px-4 py-3">
           <div className="flex flex-wrap gap-x-3.5 gap-y-1.5 text-[13px] text-muted-foreground">
-            {chord.iv.map((x, i) => <LegendDot key={i} color={ROLE_COLORS[i]}>{INT[x]} {nm(chord.rootPc + x)}</LegendDot>)}
-            {sv === 'scale' && <LegendDot outline>Other scale notes</LegendDot>}
-            {next && (
-              <span className="inline-flex items-center gap-1.5">
-                <i className="inline-block size-2 rounded-full bg-primary ring-2 ring-card" />
-                Also in the next chord, {next.name}
-              </span>
-            )}
-            {progressionMode && (
-              <span className="inline-flex flex-wrap items-center gap-x-2.5 gap-y-1 border-l pl-3.5">
-                {[...overview].sort((a, b) => a.step - b.step).map(o => (
-                  <span key={o.chord.name} className="inline-flex items-center gap-1.5">
-                    <i className="inline-block size-3 rounded-full bg-foreground" style={{ opacity: o.opacity }} />
-                    {o.chord.name}{o.step === 0 ? ' (now)' : o.step === 1 ? ' (next)' : ''}
-                  </span>
-                ))}
-              </span>
+            {progressionMode && next ? (
+              <>
+                <LegendDot color="var(--prog-now)">{chord.name} (now)</LegendDot>
+                <LegendDot color="var(--prog-next)">{next.name} (next)</LegendDot>
+                <span className="inline-flex items-center gap-1.5">
+                  <i className="inline-block size-3 rounded-full bg-[var(--prog-now)] ring-2 ring-[var(--prog-next)]" />
+                  In both — hold it through the change
+                </span>
+                <span>Bigger dot = root</span>
+              </>
+            ) : (
+              <>
+                {chord.iv.map((x, i) => <LegendDot key={i} color={ROLE_COLORS[i]}>{INT[x]} {nm(chord.rootPc + x)}</LegendDot>)}
+                {sv === 'scale' && <LegendDot outline>Other scale notes</LegendDot>}
+              </>
             )}
           </div>
           {isShapeView && (
             <div className="flex flex-wrap items-center gap-2">
-              {sv === 'sweep'
-                ? <Choice label="Strings" value={st.sweepN} onChange={v => change({ sweepN: v })} options={[3, 4, 5, 6].map(n => ({ value: n, label: `${n} strings` }))} />
-                : <Choice label="String set" value={st.triSet} onChange={v => change({ triSet: v })} options={[0, 1, 2, 3].map(a => ({ value: a, label: SNAME.slice(a, a + 3).join(' ') }))} />}
-              <Button variant="outline" size="icon" aria-label="Previous shape" disabled={!shapes.length}
-                onClick={() => set({ shapeIdx: mod(idx - 1, shapes.length) })}><ChevronLeftIcon /></Button>
-              <span className="min-w-[9ch] text-center font-mono text-[13px] text-muted-foreground tabular-nums">{shapes.length ? `${idx + 1} of ${shapes.length}` : '0 shapes'}</span>
-              <Button variant="outline" size="icon" aria-label="Next shape" disabled={!shapes.length}
-                onClick={() => set({ shapeIdx: mod(idx + 1, shapes.length) })}><ChevronRightIcon /></Button>
+              {inProg && (
+                <Choice label="Voicing type" value={st.vkind} onChange={v => change({ vkind: v })}
+                  options={[
+                    { value: 'triad', label: 'Triads', title: 'Three-note shapes on one set of three strings' },
+                    { value: 'grip', label: 'Full chords', title: 'The five CAGED chord shapes moved up the neck' },
+                  ]} />
+              )}
+              {sv === 'sweep' && <Choice label="Strings" value={st.sweepN} onChange={v => change({ sweepN: v })} options={[3, 4, 5, 6].map(n => ({ value: n, label: `${n} strings` }))} />}
+              {sv === 'triad' && <Choice label="String set" value={st.triSet} onChange={v => change({ triSet: v })} options={[0, 1, 2, 3].map(a => ({ value: a, label: SNAME.slice(a, a + 3).join(' ') }))} />}
+              {sv !== 'grip' && <Choice label="Inversion" value={st.inv} onChange={v => change({ inv: v })}
+                options={[
+                  { value: -1, label: 'All', title: 'Every voicing' },
+                  { value: 0, label: 'Root', title: 'Root position: the root is the lowest note' },
+                  { value: 1, label: '1st', title: '1st inversion: the 3rd is the lowest note' },
+                  { value: 2, label: '2nd', title: '2nd inversion: the 5th is the lowest note' },
+                  ...(sv === 'sweep' && chord.iv.length > 3 ? [{ value: 3, label: '3rd', title: '3rd inversion: the 7th is the lowest note' }] : []),
+                ]} />}
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="icon" aria-label="Previous voicing" disabled={!shapes.length}
+                  onClick={() => set({ shapeIdx: mod(idx - 1, shapes.length) })}><ChevronLeftIcon /></Button>
+                <div className="flex min-w-[15ch] flex-col items-center leading-tight">
+                  <span className="text-[13px] font-medium tabular-nums">{shapes.length ? `Voicing ${idx + 1} of ${shapes.length}` : 'No voicings'}</span>
+                  <span className="text-[11px] text-muted-foreground">{shape ? (sv === 'grip' ? shape.name : INVERSIONS[shape.bass]) : 'try another filter'}</span>
+                </div>
+                <Button variant="outline" size="icon" aria-label="Next voicing" disabled={!shapes.length}
+                  onClick={() => set({ shapeIdx: mod(idx + 1, shapes.length) })}><ChevronRightIcon /></Button>
+              </div>
             </div>
           )}
         </div>
@@ -348,7 +388,7 @@ export function Explorer({ st, set }: { st: ExplorerState; set: (patch: Partial<
       <section className="grid grid-cols-1 gap-[18px] md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
         {isShapeView && !shape && (
           <Panel title="No shapes here">
-            <p className="m-0 text-muted-foreground">Nothing fits this position with {sv === 'sweep' ? `${st.sweepN} strings` : 'these strings'}. Pick "Whole neck" or another string set.</p>
+            <p className="m-0 text-muted-foreground">Nothing fits this position with {sv === 'sweep' ? `${st.sweepN} strings` : 'these strings'}. Pick "All" positions, another inversion, or another string set.</p>
           </Panel>
         )}
         {sv === 'sweep' && shape && (() => {
@@ -376,6 +416,17 @@ export function Explorer({ st, set }: { st: ExplorerState; set: (patch: Partial<
             <p className="m-0 max-w-[65ch] text-muted-foreground">
               Triads on three strings are the building blocks of 3-string sweeps. Learn all three inversions on one string set and you can connect them up the neck.
               {chord.iv.length > 3 && ' The 7th is left out because a triad only has three notes.'}
+            </p>
+          </Panel>
+        )}
+        {sv === 'grip' && shape && (
+          <Panel title={`${chord.name} chord · ${shape.name}`}
+            description={`Frets ${shape.lo}–${shape.hi}. Strings low to high: ${[0, 1, 2, 3, 4, 5].map(s => shape.notes.find(n => n.s === s)?.f ?? 'x').join(' ')}  (x = don't play).`}>
+            <SeqStaff seq={shape.notes} picks={false} roleClass={roleClass} title={noteTitle} />
+            <p className="m-0 max-w-[65ch] text-muted-foreground">
+              Strum these together. The tab spreads them out low to high so you can see each note.
+              Every chord has the same five shapes (C, A, G, E and D) stacked up the neck, so learning them for one chord gives you all of them.
+              {chord.iv.length > 3 && ' These shapes use the chord\'s three main notes; the 7th is left out.'}
             </p>
           </Panel>
         )}
